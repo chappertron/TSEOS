@@ -146,11 +146,13 @@ class GenericMixingGibbs(FreeEnergy):
         Ts = np.asarray(Ts)
         if Ts.shape == (): Ts = [Ts]
         Ps = np.asarray(Ps)
+        if Ps.shape == (): Ps = [Ps]
 
         for T, P in itertools.product(Ts, Ps):
             #self.set_bmixer(T, P)
             # print(T,P)
-            opt_x.append(opt.minimize_scalar(target_fun, args=(T, P)).x)
+            ## bounds = (0,1) because x only in this range
+            opt_x.append(opt.minimize_scalar(target_fun, args=(T, P),method='bounded',bounds=(0,1)).x)
 
         return np.array(opt_x).reshape(len(Ts), len(Ps))
 
@@ -359,7 +361,7 @@ coef_GAB = lamb * np.array([[0, a, d],
                             [f, 0, 0]])
 
 
-omega_0 = 0.003
+omega_0 = 0.03
 coef_A = [-0.0547873, -0.0822462]
 coef_Ps = [-5.40845, 5.56087, -2.5205]
 coef_GA = np.array([[0, 0, -0.00261876, 0.000605678],
