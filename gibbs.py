@@ -2,6 +2,13 @@ from scipy.constants import gas_constant
 from abc import ABC, abstractmethod
 import numpy as np
 
+
+
+import numba as nb
+
+from numba.experimental import jitclass
+
+
 from poly2d import Poly2D
 
 import scipy.optimize as opt
@@ -108,7 +115,7 @@ class BMixingGibbs(IdealGibbs):
 
         raise NotImplementedError
 
-
+#@jitclass()
 class GenericMixingGibbs(FreeEnergy):
     '''composes a BMixingGibbs object calculates G_BA on the fly?? - depends on pressure'''
 
