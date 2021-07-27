@@ -7,7 +7,8 @@ from numpy.random import random
 import poly2d
 
 import gibbs
-from gibbs import GenericMixingGibbs, BMixingGibbs
+from gibbs import GenericMixingGibbs, BMixingGibbs,GibbsSpin
+from gibbs import biddle_params
 import numpy as np
 
 
@@ -115,3 +116,22 @@ class testGenericMixingGibbs(unittest.TestCase):
         pass
 
     pass
+
+class TestSpinner(unittest.TestCase):
+
+    def test_energy(self):
+        
+        spin = GibbsSpin(biddle_params['coef_A'],biddle_params['coef_Ps'])
+        
+        temps = np.random.random(420)
+        presses = np.random.random(69)
+        
+        randi,randj = np.random.randint(0,420), np.random.randint(0,69)
+        
+        delT = temps-1
+
+        eman = spin.polyA(delT[randi]) * (presses[randj] - spin.polyPs(delT[randi]))**1.5
+
+        e_imp = spin.energy(temps[randi],presses[randj])
+
+        self.assertEqual(eman,e_imp)

@@ -5,8 +5,9 @@ import numpy as np
 from poly2d import Poly2D
 
 import scipy.optimize as opt
-import itertools
+#import itertools
 
+import dirty_root
 
 class FreeEnergy(ABC):
 
@@ -65,6 +66,24 @@ class BMixingGibbs(IdealGibbs):
         # print(near_ideal_shape)
         # double transpose multiplies along temp axis
         return A + (T*(B + C).T).T
+
+    def energy_x_grad(self,x):
+        ###
+            # work out the energy gradient
+            # criteria for minimum =0 
+        ### TODO check this is vectorised correctly
+        ### TODO it seems just adding G_BA and Omega gets a square matrix rather than a vector (if they're both vectors.)
+        ### TODO make a rank-3 tensor like the energy is? 
+
+
+        A = self.G_BA
+        B = np.log(x/(1-x)) 
+        C = self.omega * (1-2*x)
+
+
+        A = A.reshape(C.shape) ## if a matrix, make a vector## to deal with the cases where C is a N by 1 matrix, rather than a vector
+        return A + B + C
+
 
     def x_equib(self, T, grid=1000):
 
@@ -137,35 +156,40 @@ class GenericMixingGibbs(FreeEnergy):
 
         return self.bmixer.energy(T_hat, x)
 
-    def x_equib(self, Ts, Ps):
+    def energy_x_grad(self, T,P, x):
+        self.set_bmixer(T,P)
+        return self.bmixer.energy_x_grad(x)
 
-        opt_x = []
-
-        def target_fun(x, T, P): return float(self.energy_free_x(T, P, x))
+    def x_equib(self, Ts, Ps,old = False):
+        '''
+            TODO: To do, change the optimisation procedure to find roots instead!!!!
+        '''
         
-        Ts = np.asarray(Ts)
-        if Ts.shape == (): Ts = [Ts]
-        Ps = np.asarray(Ps)
-        if Ps.shape == (): Ps = [Ps]
+        '''
+        def grad(x): 
+            return self.energy_grad(Ts,Ps,x)
 
-        for T, P in itertools.product(Ts, Ps):
-            #self.set_bmixer(T, P)
-            # print(T,P)
-            ## bounds = (0,1) because x only in this range
-            opt_x.append(opt.minimize_scalar(target_fun, args=(T, P),method='bounded',bounds=(0,1)).x)
+        x0 = 0.5
 
-        return np.array(opt_x).reshape(len(Ts), len(Ps))
+        sol = opt.root(grad,)
+        
+        return dirty_root.old_opt(self,Ts,Ps)
+        '''
+        #raise NotImplementedError
 
-        def grad(x):
-            return np.gradient(self.energy(T, x), x, axis=-1)
+        return  dirty_root.old_opt(self,Ts,Ps) #sol.x
+
+
+        # def grad(x):
+        #     return np.gradient(self.energy(T, x), x, axis=-1)
 
         # spline_approx = #
 
         # grad(x)
 
-        return opt.minimize(target_fun, x0=1)
+        # return opt.minimize(target_fun, x0=1)
 
-        return self.bmixer.x_equib(T)
+        # return self.bmixer.x_equib(T)
 
     def set_bmixer(self, T, P) -> None:
         deltaT = T - self.Tc_hat
@@ -224,18 +248,38 @@ class GibbsA(GibbsPoly):
 
 
 class GibbsSpin(FreeEnergy):
-    def __init__(self, coefA, Pc):
+    def __init__(self, coef_A, coef_Ps):
 
         self.polyA = np.polynomial.Polynomial(
-            coefA)  # Linear polynomial in deltaT
+            coef_A)  # Linear polynomial in deltaT
         self.polyPs = np.polynomial.Polynomial(
-            coefA)  # Quadratic polynomial in delta T
+            coef_Ps)  # Quadratic polynomial in delta T
 
     def energy(self, T, P):
-
+        '''
+            TODO Energy function is broken, doesn't work with vectors of both T and P, of different shapes 
+        
+        '''
         delT = T-1
 
-        return np.outer(self.polyA(delT), (P-self.polyPs(delT)**1.5))
+        #  doesn't work 
+
+        A = self.polyA(delT)
+
+        if np.shape(T) == (): T= [T]
+        if np.shape(P) == (): P= [P]
+
+        P_ghost = np.ones(np.shape(P))
+        T_ghost = np.ones(np.shape(T))
+
+        ## reshaping so each vector can be deducted 
+        B = (np.outer(T_ghost, P)-np.outer(self.polyPs(delT), P_ghost))**1.5
+
+
+        return (B.T*A).T
+        #spin.energy(Ts, Ps)
+
+        #return np.outer(self.polyA(delT), (P-self.polyPs(delT))**1.5)
 
 
 class FinalRedUnits(FreeEnergy):
@@ -245,7 +289,8 @@ class FinalRedUnits(FreeEnergy):
             except lambda is multiuplied with the coefficients a,b,d,f
 
         '''
-        self.mixer: FinalMixingGibbs = FinalMixingGibbs(coef_GAB, omega_0,Pc_hat)
+        self.mixer: FinalMixingGibbs = FinalMixingGibbs(
+            coef_GAB, omega_0, Pc_hat)
         self.spinner: GibbsSpin = GibbsSpin(coef_A, coef_Ps)
         self.gibbs_A: GibbsA = GibbsA(coef_GA, Pc_hat)
         self.fast = False
@@ -284,14 +329,13 @@ class RealGibbs(FinalRedUnits):
             Tc in K
             Pc in bar
             rho_c in g cm^-3
-
         '''
-
+        self.mol_mass = mol_mass
         self.R = gas_constant
         self.Tc = Tc
         self.Pc = Pc
         self.rhoc = rhoc
-        self.Pc_hat = 1
+        self.Pc_hat = Pc*1e5/self.R/self.rhoc_mol_m3/self.Tc ## convert to Pa then divide 
 
         self.mol_mass = mol_mass
 
@@ -309,7 +353,7 @@ class RealGibbs(FinalRedUnits):
 
     def convert_P(self, P):
 
-        return P/(self.Tc*self.R*self.rhoc_mol_m3)
+        return P*1e5/(self.Tc*self.R*self.rhoc_mol_m3)
 
     def convert_TP(self, T, P):
         '''convert the temperature and pressure to their dimensionless forms'''
@@ -349,10 +393,10 @@ class RealGibbs(FinalRedUnits):
             Is this near zero?
             can be used to see if the mixing terms are needed for the states investigated.
         '''
-        return self.mixer.x_equib(*self.convert_TP(T,P))
+        return self.mixer.x_equib(*self.convert_TP(T, P))
 
 
-crit_params = {'Tc': 182, 'Pc': 11700, 'rhoc': 1.017}
+crit_params = {'Tc': 182, 'Pc': 1700, 'rhoc': 1.017}
 
 lamb = 1.55607
 a, b, d, f = [0.154014, 0.125093, 0.00854418, 1.14576]
@@ -370,17 +414,12 @@ coef_GA = np.array([[0, 0, -0.00261876, 0.000605678],
                     [2.18819, 0.0719058, 0, 0],
                     [-0.256674, 0, 0, 0]])
 
-non_crit = {'coef_GAB':coef_GAB,'omega_0':omega_0, 'coef_A':coef_A,'coef_Ps':coef_Ps,'coef_GA':coef_GA}
+non_crit = {'coef_GAB': coef_GAB, 'omega_0': omega_0,
+            'coef_A': coef_A, 'coef_Ps': coef_Ps, 'coef_GA': coef_GA}
 
-biddle_params = {**crit_params,**non_crit}
+biddle_params = {**crit_params, **non_crit}
 
 
 class BiddleFreeEn(RealGibbs):
     def __init__(self,):
         super().__init__(**biddle_params)
-
-
-
-
-
-
