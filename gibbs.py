@@ -2,7 +2,7 @@ from scipy.constants import gas_constant
 from abc import ABC, abstractmethod
 import numpy as np
 
-
+from joblib import Memory
 
 import numba as nb
 
@@ -60,6 +60,8 @@ class BMixingGibbs(IdealGibbs):
         # pass the value'''' of omega to the level above
         super().__init__(omega)
         self.G_BA = G_BA  # assign the coefficient for G_BA
+
+        
 
     def energy(self, T, x):
         ''' As with ideal depends only on the free energy of the the above'''
@@ -119,7 +121,7 @@ class BMixingGibbs(IdealGibbs):
 class GenericMixingGibbs(FreeEnergy):
     '''composes a BMixingGibbs object calculates G_BA on the fly?? - depends on pressure'''
 
-    def __init__(self, poly_B: Poly2D, omega_func, Pc_hat):
+    def __init__(self, poly_B: Poly2D, omega_func, Pc_hat,ncores = -1):
         '''
                 poly_B = the polynomial form for the G_BA coefficient. 2d polynomial
 
@@ -130,6 +132,7 @@ class GenericMixingGibbs(FreeEnergy):
                     Critical temperature for l-l transiotn
                 Pc : float
                     critical pressure for l-l transiton
+                ncores : paralised by using ncores. specify 1 to not use
         '''
 
         self.poly_B = poly_B
@@ -141,10 +144,13 @@ class GenericMixingGibbs(FreeEnergy):
         # P_hat = P/(R T_c rho_c)
 
         self.Tc_hat = 1
+        self.ncores = ncores
         # initialise the bmixer subobject
 
         self.bmixer = BMixingGibbs(self.poly_B.grid(
             1, Pc_hat), self.omega_func(1, 0))
+
+        # self.cache = cache 
 
     def energy(self, T, P):
         x = self.x_equib(T, P)
@@ -167,6 +173,7 @@ class GenericMixingGibbs(FreeEnergy):
         self.set_bmixer(T,P)
         return self.bmixer.energy_x_grad(x)
 
+    
     def x_equib(self, Ts, Ps,old = False):
         '''
             TODO: To do, change the optimisation procedure to find roots instead!!!!
@@ -184,7 +191,7 @@ class GenericMixingGibbs(FreeEnergy):
         '''
         #raise NotImplementedError
 
-        return  dirty_root.old_opt(self,Ts,Ps) #sol.x
+        return  dirty_root.para_opt(self,Ts,Ps,Ncores=self.ncores) #sol.x
 
 
         # def grad(x):
@@ -213,7 +220,7 @@ class GenericMixingGibbs(FreeEnergy):
 
 class FinalMixingGibbs(GenericMixingGibbs):
 
-    def __init__(self, coefs_2D, omega_0, Pc_hat) -> None:
+    def __init__(self, coefs_2D, omega_0, Pc_hat,ncores = -1) -> None:
         '''
             Set up Mixing of structure free energies, as given in 
 
@@ -221,8 +228,24 @@ class FinalMixingGibbs(GenericMixingGibbs):
 
         def func_omega(t, del_p): return np.outer((1/t), (2 + omega_0*del_p))
 
-        super().__init__(Poly2D(coefs_2D), func_omega, Pc_hat)
+        super().__init__(Poly2D(coefs_2D), func_omega, Pc_hat,ncores=ncores)
 
+
+
+class Cached_Mixer(FinalMixingGibbs):
+     
+    def __init__(self,coefs_2D, omega_0, Pc_hat, mem : Memory,ncores = -1):
+        super().__init__(coefs_2D, omega_0, Pc_hat)
+        self.mem : Memory = mem
+
+    
+    def energy(self, T, P):
+        # apply decorator to cache the output 
+
+        return self.mem.cache(super().energy(T, P))  
+
+    def x_equib(self, Ts, Ps, old):
+        return self.mem.cache(super().x_equib(Ts, Ps))
 
 class GibbsPoly(FreeEnergy):
 
@@ -290,17 +313,26 @@ class GibbsSpin(FreeEnergy):
 
 
 class FinalRedUnits(FreeEnergy):
-    def __init__(self, Pc_hat: float, coef_GAB, omega_0, coef_A, coef_Ps, coef_GA, fast=False):
+    def __init__(self, Pc_hat: float, coef_GAB, omega_0, coef_A, coef_Ps, coef_GA, cache_dir = None, fast=False):
         '''
             Coefficients in the order they are in the Table I in the paper 
             except lambda is multiuplied with the coefficients a,b,d,f
 
         '''
-        self.mixer: FinalMixingGibbs = FinalMixingGibbs(
+
+
+        if cache_dir is None:
+            self.mixer: FinalMixingGibbs = FinalMixingGibbs(
             coef_GAB, omega_0, Pc_hat)
+        else:
+            self.mixer : FinalMixingGibbs = Cached_Mixer(coef_GAB, omega_0, Pc_hat,mem=Memory(cache_dir))
+        
+        
         self.spinner: GibbsSpin = GibbsSpin(coef_A, coef_Ps)
         self.gibbs_A: GibbsA = GibbsA(coef_GA, Pc_hat)
         self.fast = False
+
+
 
     def energy(self, T, P):
 
