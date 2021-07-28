@@ -174,7 +174,7 @@ class GenericMixingGibbs(FreeEnergy):
         return self.bmixer.energy_x_grad(x)
 
     
-    def x_equib(self, Ts, Ps,old = False):
+    def x_equib(self, Ts, Ps):
         '''
             TODO: To do, change the optimisation procedure to find roots instead!!!!
         '''
@@ -235,17 +235,24 @@ class FinalMixingGibbs(GenericMixingGibbs):
 class Cached_Mixer(FinalMixingGibbs):
      
     def __init__(self,coefs_2D, omega_0, Pc_hat, mem : Memory,ncores = -1):
-        super().__init__(coefs_2D, omega_0, Pc_hat)
-        self.mem : Memory = mem
 
+        ''' Applying the caching by overwriting at innit 
+            NOTE This might be a poor usage. The docs suggest caching methods is not reccommended and should really only be used for pure functions
+         
+        '''
+        super().__init__(coefs_2D, omega_0, Pc_hat,ncores=ncores)
+
+        self.mem : Memory = mem
+        self.energy  =self.mem.cache(self.energy)
+        self.x_equib = self.mem.cache(self.x_equib) 
     
-    def energy(self, T, P):
+    #def energy(self, T, P):
         # apply decorator to cache the output 
 
-        return self.mem.cache(super().energy(T, P))  
+     #   return self.mem.cache(super().energy(T, P))  
 
-    def x_equib(self, Ts, Ps, old):
-        return self.mem.cache(super().x_equib(Ts, Ps))
+    #def x_equib(self, Ts, Ps):
+    #    return self.mem.cache(super().x_equib(Ts, Ps))
 
 class GibbsPoly(FreeEnergy):
 
@@ -313,19 +320,22 @@ class GibbsSpin(FreeEnergy):
 
 
 class FinalRedUnits(FreeEnergy):
-    def __init__(self, Pc_hat: float, coef_GAB, omega_0, coef_A, coef_Ps, coef_GA, cache_dir = None, fast=False):
+    def __init__(self, Pc_hat: float, coef_GAB, omega_0, coef_A, coef_Ps, coef_GA, cache_dir = './__gibbs_cache__',ncores = -1, fast=False):
         '''
             Coefficients in the order they are in the Table I in the paper 
             except lambda is multiuplied with the coefficients a,b,d,f
 
+
+
+            cache_dir = './__gibbs_cache__' Set to none to not use caching
         '''
 
 
         if cache_dir is None:
             self.mixer: FinalMixingGibbs = FinalMixingGibbs(
-            coef_GAB, omega_0, Pc_hat)
+            coef_GAB, omega_0, Pc_hat,ncores=ncores)
         else:
-            self.mixer : FinalMixingGibbs = Cached_Mixer(coef_GAB, omega_0, Pc_hat,mem=Memory(cache_dir))
+            self.mixer : FinalMixingGibbs = Cached_Mixer(coef_GAB, omega_0, Pc_hat,mem=Memory(cache_dir),ncores=ncores)
         
         
         self.spinner: GibbsSpin = GibbsSpin(coef_A, coef_Ps)
@@ -363,7 +373,7 @@ class FinalRedUnits(FreeEnergy):
 
 class RealGibbs(FinalRedUnits):
 
-    def __init__(self, Tc, Pc: float, rhoc, coef_GAB, omega_0, coef_A, coef_Ps, coef_GA, fast=False, mol_mass=18.01):
+    def __init__(self, Tc, Pc: float, rhoc, coef_GAB, omega_0, coef_A, coef_Ps, coef_GA, fast=False, mol_mass=18.01,cache_dir = './__gibbs_cache__',ncores = -1):
         '''
             Tc in K
             Pc in bar
@@ -378,7 +388,7 @@ class RealGibbs(FinalRedUnits):
 
         self.mol_mass = mol_mass
 
-        super().__init__(self.Pc_hat, coef_GAB, omega_0, coef_A, coef_Ps, coef_GA, fast=fast)
+        super().__init__(self.Pc_hat, coef_GAB, omega_0, coef_A, coef_Ps, coef_GA, fast=fast, cache_dir = cache_dir,ncores = ncores,)
 
     def convert_T(self, T):
         return T/self.Tc
@@ -460,5 +470,5 @@ biddle_params = {**crit_params, **non_crit}
 
 
 class BiddleFreeEn(RealGibbs):
-    def __init__(self,):
-        super().__init__(**biddle_params)
+    def __init__(self,cache_dir = None,ncores = -1):
+        super().__init__(**biddle_params,cache_dir=cache_dir,ncores=ncores)

@@ -1,6 +1,7 @@
 ### helper functions to find a root of a function roughly
 
 # from gibbs import GenericMixingGibbs
+from os import pardir
 import numpy as np
 import numba as nb
 
@@ -9,6 +10,10 @@ import itertools
 from scipy.interpolate import UnivariateSpline
 import scipy.optimize as opt
 
+
+from joblib import Parallel, delayed
+
+import psutil
 
 def spline(x,v,axis = 0):
     spline = UnivariateSpline(x,v)
@@ -50,25 +55,37 @@ def old_opt(self, Ts,Ps):
 
     return np.array(opt_x).reshape(len(Ts), len(Ps))
 
-@nb.njit
-def brent_jit(func,T:np.float64,P:np.float64,lower = 0,upper = 1):
+
+def brent_opt(func,T:np.float64,P:np.float64,lower = 0,upper = 1,eps = 1e-7):
 
 
-    return opt.brentq(func,lower,upper,args = (T,P))
+    return opt.brentq(func,lower+eps,upper-eps,args = (T,P))
 
     pass
 
 
-def fast_opt(self,Ts,Ps):
+def para_opt(self,Ts,Ps, Ncores = -1,verbose = 0):
 
+
+    Ts = np.asarray(Ts)
+    if Ts.shape == ():
+        Ts = [Ts]
+    Ps = np.asarray(Ps)
+    if Ps.shape == ():
+        Ps = [Ps]
 
     func = self.energy_x_grad
 
-    @nb.vectorize
+    # @nb.vectorize
     def target_fun(x, T, P): return float(func(T, P, x))
 
-    @nb.vectorize([nb.float64(nb.float64, nb.float64)]) 
+    # @nb.vectorize([nb.float64(nb.float64, nb.float64)]) 
     def opt_one(T,P)->nb.float64:
-        return brent_jit(target_fun,T,P)
+        return brent_opt(target_fun,T,P)
     
-    return opt_one(Ts,Ps)
+    par = Parallel(n_jobs = Ncores,verbose=verbose)
+
+    results = par(delayed(opt_one)(T,P) for T in Ts for P in Ps)
+
+
+    return np.array(results).reshape(len(Ts),len(Ps))
