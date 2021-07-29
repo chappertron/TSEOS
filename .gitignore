@@ -2,6 +2,8 @@
 __pycache__/
 *.py[cod]
 *$py.class
+# Caching used by the model/Joblib
+__gibbs_cache__/ 
 
 # C extensions
 *.so
@@ -127,3 +129,4 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+__gibbs_cache__/joblib/dirty_root/para_opt/func_code.py

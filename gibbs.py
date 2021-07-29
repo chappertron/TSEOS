@@ -16,6 +16,9 @@ import scipy.optimize as opt
 
 import dirty_root
 
+import lib
+
+
 class FreeEnergy(ABC):
 
     @abstractmethod
@@ -136,7 +139,6 @@ class GenericMixingGibbs(FreeEnergy):
         '''
 
         self.poly_B = poly_B
-
         self.omega_func = omega_func
         self.Pc_hat = Pc_hat
         # redundant Tc_hat is by definition 1, only really need for Pc_hat because
@@ -170,8 +172,23 @@ class GenericMixingGibbs(FreeEnergy):
         return self.bmixer.energy(T_hat, x)
 
     def energy_x_grad(self, T,P, x):
-        self.set_bmixer(T,P)
-        return self.bmixer.energy_x_grad(x)
+        '''
+            TODO, parse the omega and gab functions here directly
+        '''
+        self.set_bmixer(T, P)
+        
+        delP = P-self.Pc_hat
+        delT = T-1
+        
+        gBA = self.poly_B.grid(delT,delP)
+
+        omega = self.omega_func(T,delP)
+
+
+        return lib.energy_x_grad_general(T,P,x,gBA,omega)
+
+        # self.set_bmixer(T,P)
+        # return self.bmixer.energy_x_grad(x)
 
     
     def x_equib(self, Ts, Ps):
@@ -191,7 +208,20 @@ class GenericMixingGibbs(FreeEnergy):
         '''
         #raise NotImplementedError
 
-        return  dirty_root.para_opt(self,Ts,Ps,Ncores=self.ncores) #sol.x
+        #### Pre evaluate the array for calculating the energies
+
+
+        delP = Ps-self.Pc_hat
+        
+        delT = Ts -1 
+
+        gBA = self.poly_B.grid(delT,delP)
+
+        omega = self.omega_func(Ts,delP)
+        
+        
+        
+        return  dirty_root.para_opt(lib.energy_x_grad_general,Ts,Ps,gBA,omega,Ncores=self.ncores) #sol.x
 
 
         # def grad(x):
@@ -226,9 +256,13 @@ class FinalMixingGibbs(GenericMixingGibbs):
 
         '''
 
-        def func_omega(t, del_p): return np.outer((1/t), (2 + omega_0*del_p))
+        self.b_coefs = coefs_2D
 
-        super().__init__(Poly2D(coefs_2D), func_omega, Pc_hat,ncores=ncores)
+        self.omega0 = omega_0
+        
+        omega_func = lambda T,delP : lib.bid_func_omega(T,delP,omega_0)
+
+        super().__init__(Poly2D(coefs_2D), omega_func, Pc_hat,ncores=ncores)
 
 
 
