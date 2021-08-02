@@ -335,7 +335,7 @@ class GibbsSpin(FreeEnergy):
 
         #  doesn't work 
 
-        A = self.polyA(delT)
+        A = self.polyA(delT)  # linear in del T 
 
         if np.shape(T) == (): T= [T]
         if np.shape(P) == (): P= [P]
@@ -344,8 +344,10 @@ class GibbsSpin(FreeEnergy):
         T_ghost = np.ones(np.shape(T))
 
         ## reshaping so each vector can be deducted 
+        # np.outer(T_ghost, P) makes an array of len(T),len(P) in shape
         B = (np.outer(T_ghost, P)-np.outer(self.polyPs(delT), P_ghost))**1.5
 
+        #assert B[0,0] == (P - self.polyPs(delT[0]))**1.5
 
         return (B.T*A).T
         #spin.energy(Ts, Ps)
@@ -391,7 +393,7 @@ class FinalRedUnits(FreeEnergy):
         return A_eng + spin_eng + mix_eng
 
     def vol(self, T, P):
-        return np.gradient(self.energy(T, P), P, axis=-1)
+        return np.gradient(self.energy(T, P), P, axis=1)
 
     def rho(self, T, P):
         return 1/self.vol(T, P)
@@ -435,7 +437,7 @@ class RealGibbs(FinalRedUnits):
         return self.rhoc * 1e6/(self.mol_mass)  # mol m^-3
 
     def convert_P(self, P):
-
+        # convert from bar to pascal and divide by quantity with units pascal (J m^-3)
         return P*1e5/(self.Tc*self.R*self.rhoc_mol_m3)
 
     def convert_TP(self, T, P):
@@ -453,7 +455,7 @@ class RealGibbs(FinalRedUnits):
         '''
             The molar volume of the system, in m^3/mol
         '''
-        return super().vol(*self.convert_TP(T, P))/self.rhoc_mol_m3
+        return super().vol(T, P)/self.rhoc_mol_m3
 
     def rho(self, T, P):
         '''
@@ -461,14 +463,14 @@ class RealGibbs(FinalRedUnits):
 
         '''
 
-        return super().rho(*self.convert_TP(T, P))*self.rhoc
+        return super().rho(T, P)    #*self.rhoc calls self.vol, so not needed...
 
     def alpha(self, T, P):
         '''
             Thermal expansion coefficient of the system in K^-1
 
         '''
-        return super().alpha(*self.convert_TP(T, P))/self.Tc  # divide by Tc to get right units
+        return super().alpha(T, P)      #/self.Tc  # divide by Tc to get right units
 
     def x(self, T, P):
         '''
