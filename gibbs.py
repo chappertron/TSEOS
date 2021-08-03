@@ -62,9 +62,9 @@ class BMixingGibbs(IdealGibbs):
 
         # pass the value'''' of omega to the level above
         super().__init__(omega)
-        self.G_BA = G_BA  # assign the coefficient for G_BA
-
         
+        self.omega = omega
+        self.G_BA = G_BA  # assign the coefficient for G_BA
 
     def energy(self, T, x):
         ''' As with ideal depends only on the free energy of the the above'''
@@ -73,32 +73,33 @@ class BMixingGibbs(IdealGibbs):
 
         A = self.G_BA * x
         B = (x*np.log(x) + (1-x)*np.log(1-x))
-        C = self.omega*x*(1-x)  # np.multiply.outer(self.omega,x*(1-x))
+        C = self.omega*x*(1-x) 
         near_ideal_shape = (B+C).shape
         # print(near_ideal_shape)
         # double transpose multiplies along temp axis
         return A + (T*(B + C).T).T
 
-    def energy_x_grad(self,x):
+    def energy_x_grad(self, T, x):
         ###
-            # work out the energy gradient
-            # criteria for minimum =0 
-        ### TODO check this is vectorised correctly
-        ### TODO it seems just adding G_BA and Omega gets a square matrix rather than a vector (if they're both vectors.)
-        ### TODO make a rank-3 tensor like the energy is? 
-
+        # work out the energy gradient
+        # criteria for minimum =0
+        # TODO check this is vectorised correctly
+        # TODO it seems just adding G_BA and Omega gets a square matrix rather than a vector (if they're both vectors.)
+        # TODO make a rank-3 tensor like the energy is?
 
         A = self.G_BA
-        B = np.log(x/(1-x)) 
+        B = np.log(x/(1-x))
         C = self.omega * (1-2*x)
 
-
-        A = A.reshape(C.shape) ## if a matrix, make a vector## to deal with the cases where C is a N by 1 matrix, rather than a vector
-        return A + B + C
-
+        # if a matrix, make a vector## to deal with the cases where C is a N by 1 matrix, rather than a vector
+        A = A.reshape(C.shape)
+        return A + (T*(B + C).T).T
 
     def x_equib(self, T, grid=1000):
-
+        '''
+            Overwritten in inherited classes. Not implemented correctly
+        
+        '''
         x = np.linspace(0, 1, grid)
 
         def grad(x):
@@ -120,11 +121,13 @@ class BMixingGibbs(IdealGibbs):
 
         raise NotImplementedError
 
-#@jitclass()
+# @jitclass()
+
+
 class GenericMixingGibbs(FreeEnergy):
     '''composes a BMixingGibbs object calculates G_BA on the fly?? - depends on pressure'''
 
-    def __init__(self, poly_B: Poly2D, omega_func, Pc_hat,ncores = -1):
+    def __init__(self, poly_B: Poly2D, omega_func, Pc_hat, ncores=-1):
         '''
                 poly_B = the polynomial form for the G_BA coefficient. 2d polynomial
 
@@ -152,7 +155,7 @@ class GenericMixingGibbs(FreeEnergy):
         self.bmixer = BMixingGibbs(self.poly_B.grid(
             1, Pc_hat), self.omega_func(1, 0))
 
-        # self.cache = cache 
+        # self.cache = cache
 
     def energy(self, T, P):
         x = self.x_equib(T, P)
@@ -171,31 +174,29 @@ class GenericMixingGibbs(FreeEnergy):
 
         return self.bmixer.energy(T_hat, x)
 
-    def energy_x_grad(self, T,P, x):
+    def energy_x_grad(self, T, P, x):
         '''
             TODO, parse the omega and gab functions here directly
         '''
         self.set_bmixer(T, P)
-        
+
         delP = P-self.Pc_hat
         delT = T-1
-        
-        gBA = self.poly_B.grid(delT,delP)
 
-        omega = self.omega_func(T,delP)
+        gBA = self.poly_B.grid(delT, delP)
 
+        omega = self.omega_func(T, delP)
 
-        return lib.energy_x_grad_general(T,P,x,gBA,omega)
+        return lib.energy_x_grad_general(T, P, x, gBA, omega)
 
         # self.set_bmixer(T,P)
         # return self.bmixer.energy_x_grad(x)
 
-    
     def x_equib(self, Ts, Ps):
         '''
             TODO: To do, change the optimisation procedure to find roots instead!!!!
         '''
-        
+
         '''
         def grad(x): 
             return self.energy_grad(Ts,Ps,x)
@@ -208,21 +209,21 @@ class GenericMixingGibbs(FreeEnergy):
         '''
         #raise NotImplementedError
 
-        #### Pre evaluate the array for calculating the energies
-
+        # Pre evaluate the array for calculating the energies
+    
+        
+        self.set_bmixer(Ts,Ps)
 
         delP = Ps-self.Pc_hat
-        
-        delT = Ts -1 
 
-        gBA = self.poly_B.grid(delT,delP)
+        delT = Ts - 1
 
-        omega = self.omega_func(Ts,delP)
-        
-        
-        
-        return  dirty_root.para_opt(lib.energy_x_grad_general,Ts,Ps,gBA,omega,Ncores=self.ncores) #sol.x
+        gBA = self.poly_B.grid(delT, delP)
 
+        omega = self.omega_func(Ts, delP)
+
+        # sol.x
+        return dirty_root.para_opt(lib.energy_x_grad_general, Ts, Ps, gBA, omega, Ncores=self.ncores)
 
         # def grad(x):
         #     return np.gradient(self.energy(T, x), x, axis=-1)
@@ -250,7 +251,7 @@ class GenericMixingGibbs(FreeEnergy):
 
 class FinalMixingGibbs(GenericMixingGibbs):
 
-    def __init__(self, coefs_2D, omega_0, Pc_hat,ncores = -1) -> None:
+    def __init__(self, coefs_2D, omega_0, Pc_hat, ncores=-1) -> None:
         '''
             Set up Mixing of structure free energies, as given in 
 
@@ -259,34 +260,33 @@ class FinalMixingGibbs(GenericMixingGibbs):
         self.b_coefs = coefs_2D
 
         self.omega0 = omega_0
-        
-        omega_func = lambda T,delP : lib.bid_func_omega(T,delP,omega_0)
 
-        super().__init__(Poly2D(coefs_2D), omega_func, Pc_hat,ncores=ncores)
+        def omega_func(T, delP): return lib.bid_func_omega(T, delP, omega_0)
 
+        super().__init__(Poly2D(coefs_2D), omega_func, Pc_hat, ncores=ncores)
 
 
 class Cached_Mixer(FinalMixingGibbs):
-     
-    def __init__(self,coefs_2D, omega_0, Pc_hat, mem : Memory,ncores = -1):
 
+    def __init__(self, coefs_2D, omega_0, Pc_hat, mem: Memory, ncores=-1):
         ''' Applying the caching by overwriting at innit 
             NOTE This might be a poor usage. The docs suggest caching methods is not reccommended and should really only be used for pure functions
-         
+
         '''
-        super().__init__(coefs_2D, omega_0, Pc_hat,ncores=ncores)
+        super().__init__(coefs_2D, omega_0, Pc_hat, ncores=ncores)
 
-        self.mem : Memory = mem
-        self.energy  =self.mem.cache(self.energy)
-        self.x_equib = self.mem.cache(self.x_equib) 
-    
-    #def energy(self, T, P):
-        # apply decorator to cache the output 
+        self.mem: Memory = mem
+        self.energy = self.mem.cache(self.energy)
+        self.x_equib = self.mem.cache(self.x_equib)
 
-     #   return self.mem.cache(super().energy(T, P))  
+    # def energy(self, T, P):
+        # apply decorator to cache the output
 
-    #def x_equib(self, Ts, Ps):
+     #   return self.mem.cache(super().energy(T, P))
+
+    # def x_equib(self, Ts, Ps):
     #    return self.mem.cache(super().x_equib(Ts, Ps))
+
 
 class GibbsPoly(FreeEnergy):
 
@@ -298,7 +298,7 @@ class GibbsPoly(FreeEnergy):
         '''
             Calculate grid of energy values, for provided pressures and temps. 
             T : unit less temperature property
-            P : unitless Pressure property. NB. may need to convert to deltas, depending on implementation
+            P : unitless Pressure property. NB. may need to convert to deltas, depending on implementation - done in child classes, e.g. GibbsA
         '''
         return self.poly.grid(T, P)
 
@@ -329,21 +329,24 @@ class GibbsSpin(FreeEnergy):
     def energy(self, T, P):
         '''
             TODO Energy function is broken, doesn't work with vectors of both T and P, of different shapes 
-        
+
         '''
         delT = T-1
 
-        #  doesn't work 
+        #  doesn't work
 
-        A = self.polyA(delT)  # linear in del T 
+        A = self.polyA(delT)  # linear in del T
 
-        if np.shape(T) == (): T= [T]
-        if np.shape(P) == (): P= [P]
+        if np.shape(T) == ():
+            T = [T]
+        if np.shape(P) == ():
+            P = [P]
 
+        # For making properly sized arrays so that they play nicely
         P_ghost = np.ones(np.shape(P))
         T_ghost = np.ones(np.shape(T))
 
-        ## reshaping so each vector can be deducted 
+        # reshaping so each vector can be deducted
         # np.outer(T_ghost, P) makes an array of len(T),len(P) in shape
         B = (np.outer(T_ghost, P)-np.outer(self.polyPs(delT), P_ghost))**1.5
 
@@ -352,11 +355,11 @@ class GibbsSpin(FreeEnergy):
         return (B.T*A).T
         #spin.energy(Ts, Ps)
 
-        #return np.outer(self.polyA(delT), (P-self.polyPs(delT))**1.5)
+        # return np.outer(self.polyA(delT), (P-self.polyPs(delT))**1.5)
 
 
 class FinalRedUnits(FreeEnergy):
-    def __init__(self, Pc_hat: float, coef_GAB, omega_0, coef_A, coef_Ps, coef_GA, cache_dir = './__gibbs_cache__',ncores = -1, fast=False):
+    def __init__(self, Pc_hat: float, coef_GAB, omega_0, coef_A, coef_Ps, coef_GA, cache_dir='./__gibbs_cache__', ncores=-1, fast=False):
         '''
             Coefficients in the order they are in the Table I in the paper 
             except lambda is multiuplied with the coefficients a,b,d,f
@@ -365,20 +368,18 @@ class FinalRedUnits(FreeEnergy):
 
             cache_dir = './__gibbs_cache__' Set to none to not use caching
         '''
-
+        self.Pc_hat = Pc_hat
 
         if cache_dir is None:
             self.mixer: FinalMixingGibbs = FinalMixingGibbs(
-            coef_GAB, omega_0, Pc_hat,ncores=ncores)
+                coef_GAB, omega_0, Pc_hat, ncores=ncores)
         else:
-            self.mixer : FinalMixingGibbs = Cached_Mixer(coef_GAB, omega_0, Pc_hat,mem=Memory(cache_dir),ncores=ncores)
-        
-        
+            self.mixer: FinalMixingGibbs = Cached_Mixer(
+                coef_GAB, omega_0, Pc_hat, mem=Memory(cache_dir), ncores=ncores)
+
         self.spinner: GibbsSpin = GibbsSpin(coef_A, coef_Ps)
         self.gibbs_A: GibbsA = GibbsA(coef_GA, Pc_hat)
         self.fast = False
-
-
 
     def energy(self, T, P):
 
@@ -409,7 +410,7 @@ class FinalRedUnits(FreeEnergy):
 
 class RealGibbs(FinalRedUnits):
 
-    def __init__(self, Tc, Pc: float, rhoc, coef_GAB, omega_0, coef_A, coef_Ps, coef_GA, fast=False, mol_mass=18.01,cache_dir = './__gibbs_cache__',ncores = -1):
+    def __init__(self, Tc, Pc: float, rhoc, coef_GAB, omega_0, coef_A, coef_Ps, coef_GA, fast=False, mol_mass=18.015, cache_dir='./__gibbs_cache__', ncores=-1):
         '''
             Tc in K
             Pc in bar
@@ -420,11 +421,12 @@ class RealGibbs(FinalRedUnits):
         self.Tc = Tc
         self.Pc = Pc
         self.rhoc = rhoc
-        self.Pc_hat = Pc*1e5/self.R/self.rhoc_mol_m3/self.Tc ## convert to Pa then divide 
+        Pc_hat = self.convert_P(Pc) #*1e5/self.R/self.rhoc_mol_m3/self.Tc  # convert to Pa then divide
 
         self.mol_mass = mol_mass
 
-        super().__init__(self.Pc_hat, coef_GAB, omega_0, coef_A, coef_Ps, coef_GA, fast=fast, cache_dir = cache_dir,ncores = ncores,)
+        super().__init__(Pc_hat, coef_GAB, omega_0, coef_A, coef_Ps,
+                         coef_GA, fast=fast, cache_dir=cache_dir, ncores=ncores,)
 
     def convert_T(self, T):
         return T/self.Tc
@@ -463,14 +465,14 @@ class RealGibbs(FinalRedUnits):
 
         '''
 
-        return super().rho(T, P)    #*self.rhoc calls self.vol, so not needed...
+        return super().rho(T, P)  # *self.rhoc calls self.vol, so not needed...
 
     def alpha(self, T, P):
         '''
             Thermal expansion coefficient of the system in K^-1
 
         '''
-        return super().alpha(T, P)      #/self.Tc  # divide by Tc to get right units
+        return super().alpha(T, P)  # /self.Tc  # divide by Tc to get right units
 
     def x(self, T, P):
         '''
@@ -506,5 +508,5 @@ biddle_params = {**crit_params, **non_crit}
 
 
 class BiddleFreeEn(RealGibbs):
-    def __init__(self,cache_dir = None,ncores = -1):
-        super().__init__(**biddle_params,cache_dir=cache_dir,ncores=ncores)
+    def __init__(self, cache_dir=None, ncores=-1):
+        super().__init__(**biddle_params, cache_dir=cache_dir, ncores=ncores)

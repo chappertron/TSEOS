@@ -18,8 +18,8 @@ def energy_x_grad_general(T,P,x,Gs,omegas):
 
 
         A = A.reshape(C.shape) ## if a matrix, make a vector## to deal with the cases where C is a N by 1 matrix, rather than a vector
-        return A + B + C
-
+        return A + (T*(B + C).T).T
+        #return A + B + C
 
 def energy_x_grad_biddle(T,P,x,poly_B:Poly2D,omega0:float):
 
